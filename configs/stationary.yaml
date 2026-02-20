@@ -1,0 +1,35 @@
+experiment:
+  name: stationary
+  T: 10000
+  seeds: 20
+  log_every: 1000
+
+env:
+  n_arms: 20
+  n_candidates: 10
+  cold_start_user_prob: 0.02
+
+models:
+  fm:
+    k: 12
+    lr: 0.05
+    prior_var: 1.0
+    drift_var: 0.0
+  logistic:
+    lr: 0.1
+    prior_var: 1.0
+    drift_var: 0.0
+
+  probit:
+    prior_var: 5.0
+    window: 300
+    gibbs_steps: 2
+    update_every: 10
+
+  hybrid:
+    warmup_impressions: 30  
+  
+metrics:
+  cold_m: 30
+  early_n: 1000
+
