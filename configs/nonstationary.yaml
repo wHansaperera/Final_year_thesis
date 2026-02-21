@@ -1,13 +1,38 @@
+# experiment:
+#   name: nonstationary
+#   T: 10000
+#   seeds: 20
+#   shift_time: 5000
+
+# env:
+#   n_arms: 20
+#   n_candidates: 10
+#   cold_start_user_prob: 0.02
+
+# models:
+#   fm:
+#     k: 8
+#     lr: 0.05
+#     prior_var: 1.0
+#     drift_var: 0.002
+#   logistic:
+#     lr: 0.1
+#     prior_var: 1.0
+#     drift_var: 0.002
+
 experiment:
   name: nonstationary
   T: 10000
   seeds: 20
   shift_time: 5000
+  log_every: 1000
 
 env:
   n_arms: 20
   n_candidates: 10
   cold_start_user_prob: 0.02
+  n_user_segments: 6
+  bias: -2.0
 
 models:
   fm:
@@ -15,7 +40,24 @@ models:
     lr: 0.05
     prior_var: 1.0
     drift_var: 0.002
+
+  # You can keep this, but your current nonstationary runner doesn't use logistic_ts anymore
   logistic:
     lr: 0.1
     prior_var: 1.0
     drift_var: 0.002
+
+  # ✅ REQUIRED by your current run_nonstationary.py
+  probit:
+    prior_var: 5.0
+    window: 300
+    gibbs_steps: 2
+    update_every: 10
+
+  # ✅ REQUIRED if you include hybrid in agents dict
+  hybrid:
+    warmup_impressions: 30
+
+metrics:
+  cold_m: 30
+  early_n: 1000
