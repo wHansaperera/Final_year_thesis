@@ -57,7 +57,9 @@ models:
   # ✅ REQUIRED if you include hybrid in agents dict
   hybrid:
     warmup_impressions: 30
+    recovery_steps: 500
 
 metrics:
   cold_m: 30
   early_n: 1000
+  adapt_w: 500

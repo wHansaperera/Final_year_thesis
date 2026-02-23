@@ -144,6 +144,7 @@ from bandit_thesis.agents.hybrid_agent import HybridColdStartAgent
 
 from bandit_thesis.metrics.ctr import ctr_overall
 from bandit_thesis.metrics.regret import cumulative_dynamic_regret
+from bandit_thesis.metrics.cold_start
 from bandit_thesis.validation.protocols import make_rng_streams
 from bandit_thesis.validation.reporting import summarize_experiment
 from bandit_thesis.utils.io import write_jsonl, write_csv
@@ -194,6 +195,7 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
         probit=agent_probit,
         fm=agent_fm,
         warmup_impressions=int(hcfg["warmup_impressions"]),
+        recovery_steps=int(hcfg.get("recovery_steps", 500)),
     )
 
     agents = {
@@ -208,7 +210,8 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
     seed_start = time.perf_counter()
 
     for name, agent in agents.items():
-        env.reset()
+        if hasattr(agent, "reset"):
+            agent.reset()  # reset any internal state if needed
 
         rewards: List[int] = []
         p_opt: List[float] = []
@@ -218,7 +221,16 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
         model_start = time.perf_counter()
 
         for i in range(T):
+            if env.nonstationarityis not None:
+                env.nonstationarity.apply(env, env.t)
+
+
+            # ✅ if shift just happened, tell hybrid
+            if env.t == shift_time and name == "hybrid" and hasattr(agent, "on_shift"):
+                agent.on_shift(env.t)
+
             ctx = env.sample_context(env.t)
+            ctx["t"] = env.t  # add time to context for featurization if needed
             cand = env.candidate_set(ctx)
             X_cand = np.vstack([featurizer.transform(ctx, int(a)) for a in cand])
 
@@ -266,6 +278,15 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
                     f"elapsed={elapsed:6.1f}s  rate={rate:7.1f} it/s"
                 )
 
+            if hasattr(agent,'flush'):
+                agent.flush()  # ensure any pending updates are applied
+
+        shift_time = int(cfg["experiment"]["shift_time"])
+        w_adapt = int(cfg.get("metrics", {}).get("adapt_w", 1000))
+
+        ctr_post_shift = ctr_after_shift(rows, shift_time=shift_time, w=w_adapt)
+        ctr_tail = ctr_last_w(rows, w=w_adapt)
+
         # save raw logs
         write_jsonl(f"results/raw/nonstationary/{name}/seed_{seed}.jsonl", rows)
 
@@ -275,6 +296,8 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
         results[name] = {
             "ctr": float(ctr_overall(np.array(rewards))),
             "final_regret": float(cum_reg[-1]),
+            "ctr_after_shift": float(ctr_post_shift),
+            "ctr_last_w": float(ctr_tail),
             "time_sec": float(time.perf_counter() - model_start),
         }
 
@@ -293,10 +316,10 @@ def main() -> None:
     seeds = int(cfg["experiment"]["seeds"])
 
     metrics_by_agent = {
-        "random": {"ctr": [], "regret": [], "time": []},
-        "probit_ts": {"ctr": [], "regret": [], "time": []},
-        "bayes_fm_ts": {"ctr": [], "regret": [], "time": []},
-        "hybrid": {"ctr": [], "regret": [], "time": []},
+            "random": {"ctr": [], "regret": [], "ctr_after_shift": [], "ctr_last_w": [], "time": []},
+            "probit_ts": {"ctr": [], "regret": [], "ctr_after_shift": [], "ctr_last_w": [], "time": []},
+            "bayes_fm_ts": {"ctr": [], "regret": [], "ctr_after_shift": [], "ctr_last_w": [], "time": []},
+            "hybrid": {"ctr": [], "regret": [], "ctr_after_shift": [], "ctr_last_w": [], "time": []},
     }
 
     overall_start = time.perf_counter()
@@ -307,6 +330,9 @@ def main() -> None:
             metrics_by_agent[agent]["ctr"].append(vals["ctr"])
             metrics_by_agent[agent]["regret"].append(vals["final_regret"])
             metrics_by_agent[agent]["time"].append(vals.get("time_sec", 0.0))
+            metrics_by_agent[agent]["ctr_after_shift"].append(vals["ctr_after_shift"])
+            metrics_by_agent[agent]["ctr_last_w"].append(vals["ctr_last_w"])
+
 
     overall_time = time.perf_counter() - overall_start
 

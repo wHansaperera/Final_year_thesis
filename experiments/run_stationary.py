@@ -322,7 +322,10 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
         model_start = time.perf_counter()
 
         for i in range(T):
+
+
             ctx = env.sample_context(env.t)
+            ctx["t"] = env.t  # add time to context for featurization if needed
             cand = env.candidate_set(ctx)
             X_cand = np.vstack([featurizer.transform(ctx, int(a)) for a in cand])
 
