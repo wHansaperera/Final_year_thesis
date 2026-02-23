@@ -221,7 +221,7 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
         model_start = time.perf_counter()
 
         for i in range(T):
-            if env.nonstationarityis not None:
+            if env.nonstationarity is not None:
                 env.nonstationarity.apply(env, env.t)
 
 
