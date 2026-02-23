@@ -144,7 +144,7 @@ from bandit_thesis.agents.hybrid_agent import HybridColdStartAgent
 
 from bandit_thesis.metrics.ctr import ctr_overall
 from bandit_thesis.metrics.regret import cumulative_dynamic_regret
-from bandit_thesis.metrics.cold_start
+from bandit_thesis.metrics.cold_start import ctr_after_shift, ctr_last_w,
 from bandit_thesis.validation.protocols import make_rng_streams
 from bandit_thesis.validation.reporting import summarize_experiment
 from bandit_thesis.utils.io import write_jsonl, write_csv
