@@ -310,7 +310,9 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
     seed_start = time.perf_counter()
 
     for name, agent in agents.items():
-        env.reset()
+        if hasattr(agent, "reset"):
+            agent.reset()  # reset any internal state if needed
+        
 
         rewards: List[int] = []
         p_opt: List[float] = []

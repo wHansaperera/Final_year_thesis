@@ -69,6 +69,10 @@ class ProbitTSAgent:
         if self._t % self.update_every == 0:
             self.model.update()
 
+    # def flush(self) -> None:
+    #     # ensure last partial batch is reflected in posterior
+    #     self.model.update()
+
     def flush(self) -> None:
-        # ensure last partial batch is reflected in posterior
-        self.model.update()
+        if len(self.model._X) > 0:
+            self.model.update()
