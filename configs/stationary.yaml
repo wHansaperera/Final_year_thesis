@@ -58,7 +58,7 @@ models:
     window: 200
     gibbs_steps: 1
     update_every: 50
-    ridge: 1e-6
+    ridge: 0.000001   # safer than 1e-6 in YAML
 
   hybrid:
     warmup_impressions: 30

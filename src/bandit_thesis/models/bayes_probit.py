@@ -7,6 +7,14 @@ import numpy as np
 from scipy.stats import norm
 from scipy.stats import truncnorm
 
+# @dataclass
+# class ProbitConfig:
+#     p: int
+#     prior_var: float = 5.0
+#     window: int = 1000
+#     gibbs_steps: int = 3
+#     ridge: float = 1e-6
+
 @dataclass
 class ProbitConfig:
     p: int
@@ -15,6 +23,11 @@ class ProbitConfig:
     gibbs_steps: int = 3
     ridge: float = 1e-6
 
+    def __post_init__(self) -> None:
+        self.prior_var = float(self.prior_var)
+        self.window = int(self.window)
+        self.gibbs_steps = int(self.gibbs_steps)
+        self.ridge = float(self.ridge)
 
 # def sample_trunc_normal(rng: np.random.Generator, mu: float, lower: float, upper: float) -> float:
 #     """

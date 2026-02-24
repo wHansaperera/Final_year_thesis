@@ -512,7 +512,7 @@ def _make_agent(
         prior_var=pcfg["prior_var"],
         window=pcfg["window"],
         gibbs_steps=pcfg["gibbs_steps"],
-        ridge=pcfg.get("ridge", 1e-6),
+        ridge=float(pcfg.get("ridge", 1e-6)),
     )
     probit_model = BayesianProbitPosterior(probit_cfg, rng=rng_agent)
     agent_probit = ProbitTSAgent(probit_model, update_every=pcfg.get("update_every", 50))
