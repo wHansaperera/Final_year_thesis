@@ -74,5 +74,6 @@ class ProbitTSAgent:
     #     self.model.update()
 
     def flush(self) -> None:
-        if len(self.model._X) > 0:
-            self.model.update()
+    # only flush if there is leftover batch
+        if self._t % self.update_every != 0:
+             self.model.update()

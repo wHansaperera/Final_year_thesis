@@ -147,5 +147,6 @@ class HybridColdStartAgent:
         self.fm.update(x_chosen, reward)
 
     def flush(self) -> None:
-        if hasattr(self.probit, "flush"):
-            self.probit.flush()
+    # only flush if there is leftover batch
+        if self._t % self.update_every != 0:
+            self.model.update()
