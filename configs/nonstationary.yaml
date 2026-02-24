@@ -50,9 +50,9 @@ models:
   # ✅ REQUIRED by your current run_nonstationary.py
   probit:
     prior_var: 5.0
-    window: 300
-    gibbs_steps: 2
-    update_every: 20
+    window: 200
+    gibbs_steps: 1
+    update_every: 50
 
   # ✅ REQUIRED if you include hybrid in agents dict
   hybrid:

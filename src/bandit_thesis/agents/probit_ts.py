@@ -50,7 +50,7 @@ from bandit_thesis.models.bayes_probit import BayesianProbitPosterior
 @dataclass
 class ProbitTSAgent:
     model: BayesianProbitPosterior
-    update_every: int = 10
+    update_every: int = 50  # update posterior every N steps (batch updates for efficiency)
 
     def __post_init__(self) -> None:
         self._t = 0
