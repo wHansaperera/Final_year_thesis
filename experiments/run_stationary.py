@@ -158,11 +158,17 @@ def run_one_seed(seed: int, cfg: dict) -> Dict[str, Dict[str, float]]:
             p_opt.append(step.p_opt)
             p_chosen.append(step.p_chosen)
 
+            chosen_group = int(env.arm_group[int(step.chosen_arm)])
+            candidate_groups = sorted(set(int(env.arm_group[int(a)]) for a in cand))
+
             rows.append(
                 {
                     "t": step.t,
                     "context": step.context,
                     "chosen_arm": step.chosen_arm,
+                    # ✅ add these
+                    "chosen_group": chosen_group,
+                    "candidate_groups": candidate_groups,
                     "reward": step.reward,
                     "p_opt": step.p_opt,
                     "p_chosen": step.p_chosen,

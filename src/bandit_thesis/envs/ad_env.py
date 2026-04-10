@@ -103,20 +103,7 @@ class AdPersonalizationEnv:
         n = min(self.cfg.n_candidates, self.cfg.n_arms)
         return self.rng.choice(self.cfg.n_arms, size=n, replace=False).astype(int)
 
-    # def expected_reward(self, context: Dict[str, Any], arm: int) -> float:
-    #     cfg = self.cfg
-    #     s = int(context["segment_id"])
-    #     g = int(self.arm_group[int(arm)])
-    #     logit = (
-    #         cfg.bias
-    #         + float(self.true_w_segment[s])
-    #         + float(self.true_w_arm[int(arm)])
-    #         + float(self.true_W_inter[s, g])
-    #         + self.true_w_device * float(context["device"])
-    #         + self.true_w_weekend * float(context["is_weekend"])
-    #         + float(self.true_w_hour[int(context["hour_bucket"])])
-    #     )
-    #     return sigmoid(logit)
+    
 
     def expected_reward(self, context: Dict[str, Any], arm: int) -> float:
         cfg = self.cfg
