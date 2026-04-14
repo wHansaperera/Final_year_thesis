@@ -9,9 +9,11 @@ from ..models.bayesian_fm import BayesianFM
 class ThompsonAgent:
     model: BayesianFM
 
+    def score_candidates(self, X_cand: np.ndarray) -> np.ndarray:
+        return self.model.sampled_probabilities(X_cand)
+
     def select_arm(self, X_cand: np.ndarray, candidate_arms: np.ndarray) -> int:
-        # X_cand: (n_candidates, p)
-        scores = np.array([self.model.thompson_score(X_cand[i]) for i in range(X_cand.shape[0])])
+        scores = self.score_candidates(X_cand)
         return int(candidate_arms[int(np.argmax(scores))])
 
     def update(self, x: np.ndarray, reward: int) -> None:

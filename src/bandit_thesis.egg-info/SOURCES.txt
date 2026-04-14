@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 src/bandit_thesis/__init__.py
+src/bandit_thesis/experiment.py
 src/bandit_thesis.egg-info/PKG-INFO
 src/bandit_thesis.egg-info/SOURCES.txt
 src/bandit_thesis.egg-info/dependency_links.txt
@@ -8,7 +9,6 @@ src/bandit_thesis.egg-info/requires.txt
 src/bandit_thesis.egg-info/top_level.txt
 src/bandit_thesis/agents/__init__.py
 src/bandit_thesis/agents/hybrid_agent.py
-src/bandit_thesis/agents/logistic_ts.py
 src/bandit_thesis/agents/probit_ts.py
 src/bandit_thesis/agents/random_agent.py
 src/bandit_thesis/agents/ts_agent.py
@@ -27,6 +27,5 @@ src/bandit_thesis/models/bayesian_fm.py
 src/bandit_thesis/utils/__init__.py
 src/bandit_thesis/utils/io.py
 src/bandit_thesis/validation/__init__.py
-src/bandit_thesis/validation/protocols.py
 src/bandit_thesis/validation/reporting.py
 src/bandit_thesis/validation/stat_tests.py

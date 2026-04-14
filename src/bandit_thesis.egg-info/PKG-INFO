@@ -11,15 +11,46 @@ Requires-Dist: matplotlib
 Requires-Dist: pyyaml
 Requires-Dist: scikit-learn>=1.3
 
-# Bayesian FM Contextual Bandit Thesis (Simulation)
+# Bayesian Hybrid Contextual Bandit Thesis
 
-This repo runs simulation experiments for contextual bandits:
-- Random baseline
-- Logistic Thompson Sampling baseline
-- Bayesian FM + Thompson Sampling (proposed)
+Simulation study for a personalized contextual multi-armed bandit in ad personalization.
+
+Active agents:
+- `random`
+- `probit_ts`
+- `bayes_fm_ts`
+- `hybrid` (proposed)
+
+The simulator now uses persistent users, user-level cold start, and abrupt preference shifts.
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
 pip install -e .
+```
+
+## Main Runs
+
+```bash
+python -m experiments.run_stationary
+python -m experiments.run_nonstationary
+```
+
+## Validation
+
+```bash
+python experiments/validation/step0_verify_design.py
+python experiments/validation/step1_metrics_report.py
+python experiments/validation/step2_significance_tests.py
+python experiments/validation/step3_effect_size.py
+python experiments/validation/step4_personalization_conditional.py
+python experiments/validation/step5_plots.py
+```
+
+Outputs are written under `results/`:
+- `results/raw/`
+- `results/tables/`
+- `results/validation/`
+- `results/figures/`
+- `results/manifests/`

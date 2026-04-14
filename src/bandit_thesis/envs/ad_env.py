@@ -1,9 +1,8 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-# from multiprocessing import context
 from typing import Any, Dict, Optional
 
-# from matplotlib.style import context
 import numpy as np
 
 from .shifts import AbruptShift
@@ -23,6 +22,7 @@ class BanditStep:
     p_chosen: float
     p_opt: float
     opt_arm: int
+    shift_applied: bool
 
 
 @dataclass
@@ -30,17 +30,26 @@ class AdEnvConfig:
     n_arms: int = 20
     n_candidates: int = 10
     cold_start_user_prob: float = 0.02
+    max_users: int = 160
     n_user_segments: int = 6
     bias: float = -2.0
 
 
 class AdPersonalizationEnv:
     """
-    Environment for contextual bandit simulation.
-    - sample_context(): creates a user context
-    - candidate_set(): shows a subset of arms
-    - expected_reward(): true P(click|x,a)
-    - step(a): returns BanditStep + oracle info for regret
+    Synthetic ad-personalization environment with persistent users.
+
+    Observed context:
+    - user_id
+    - stable user segment
+    - transient device / hour / weekend features
+
+    Hidden preference structure:
+    - user-specific affinity over arm groups
+    - segment-level affinity over arm groups
+
+    This keeps the simulator a contextual bandit while making cold start
+    and repeated-user personalization meaningful.
     """
 
     def __init__(
@@ -56,78 +65,92 @@ class AdPersonalizationEnv:
 
         self.G = max(3, int(np.sqrt(cfg.n_arms)))
         self.arm_group = self.rng.integers(0, self.G, size=cfg.n_arms)
-        self.next_user_id = 0
 
         self._init_true_params()
+        self.reset()
 
     def _init_true_params(self) -> None:
         cfg = self.cfg
-        self.true_w_segment = self.rng.normal(0.0, 1.0, size=cfg.n_user_segments)
-        self.true_w_arm = self.rng.normal(0.0, 1.0, size=cfg.n_arms)
-        self.true_W_inter = self.rng.normal(0.0, 1.2, size=(cfg.n_user_segments, self.G))
-        self.true_w_device = float(self.rng.normal(0.0, 0.3))
-        self.true_w_weekend = float(self.rng.normal(0.0, 0.3))
-        self.true_w_hour = self.rng.normal(0.0, 0.2, size=6)
+
+        self.user_segment = self.rng.integers(0, cfg.n_user_segments, size=cfg.max_users)
+
+        self.base_arm_bias = self.rng.normal(0.0, 0.35, size=cfg.n_arms)
+        self.base_user_bias = self.rng.normal(0.0, 0.25, size=cfg.max_users)
+        self.base_segment_group = self.rng.normal(0.0, 0.65, size=(cfg.n_user_segments, self.G))
+        self.base_user_group = self.rng.normal(0.0, 1.0, size=(cfg.max_users, self.G))
+        self.base_device_w = float(self.rng.normal(0.0, 0.20))
+        self.base_weekend_w = float(self.rng.normal(0.0, 0.15))
+        self.base_hour_w = self.rng.normal(0.0, 0.10, size=6)
 
     def reset(self) -> None:
         self.t = 0
         self.next_user_id = 0
+        self.user_impressions = np.zeros(self.cfg.max_users, dtype=int)
+
+        self.true_arm_bias = self.base_arm_bias.copy()
+        self.true_user_bias = self.base_user_bias.copy()
+        self.true_segment_group = self.base_segment_group.copy()
+        self.true_user_group = self.base_user_group.copy()
+        self.true_device_w = float(self.base_device_w)
+        self.true_weekend_w = float(self.base_weekend_w)
+        self.true_hour_w = self.base_hour_w.copy()
+
+        if self.nonstationarity is not None:
+            self.nonstationarity.reset()
 
     def sample_context(self, t: int) -> Dict[str, Any]:
-        cfg = self.cfg
+        del t
 
-        if self.rng.random() < cfg.cold_start_user_prob:
-            user_id = self.next_user_id
-            self.next_user_id += 1
+        if self.next_user_id == 0:
+            user_id = 0
+            self.next_user_id = 1
         else:
-            if self.next_user_id == 0:
+            introduce_new = (
+                self.next_user_id < self.cfg.max_users
+                and self.rng.random() < self.cfg.cold_start_user_prob
+            )
+            if introduce_new:
                 user_id = self.next_user_id
                 self.next_user_id += 1
             else:
                 user_id = int(self.rng.integers(0, self.next_user_id))
 
-        segment_id = int(self.rng.integers(0, cfg.n_user_segments))
-        device = int(self.rng.integers(0, 2))
-        hour_bucket = int(self.rng.integers(0, 6))
-        is_weekend = int(self.rng.integers(0, 2))
+        history_len = int(self.user_impressions[user_id])
+        segment_id = int(self.user_segment[user_id])
 
         return {
             "user_id": user_id,
             "segment_id": segment_id,
-            "device": device,
-            "hour_bucket": hour_bucket,
-            "is_weekend": is_weekend,
+            "user_history_len": history_len,
+            "is_new_user": int(history_len == 0),
+            "device": int(self.rng.integers(0, 2)),
+            "hour_bucket": int(self.rng.integers(0, 6)),
+            "is_weekend": int(self.rng.integers(0, 2)),
         }
 
     def candidate_set(self, context: Dict[str, Any]) -> np.ndarray:
+        del context
         n = min(self.cfg.n_candidates, self.cfg.n_arms)
         return self.rng.choice(self.cfg.n_arms, size=n, replace=False).astype(int)
 
-    
-
     def expected_reward(self, context: Dict[str, Any], arm: int) -> float:
         cfg = self.cfg
-        s = int(context["segment_id"])
-        g = int(self.arm_group[int(arm)])
+        user_id = int(context["user_id"])
+        segment_id = int(context["segment_id"])
+        group_id = int(self.arm_group[int(arm)])
 
-        # 1) Make interaction dominate (this is what FM learns best)
-        interaction = 4.0 * float(self.true_W_inter[s, g])   # BIG
-
-        # 2) Make linear terms smaller (logistic baseline can't fully solve)
-        seg_base = 0.1 * float(self.true_w_segment[s])
-        arm_base = 0.05 * float(self.true_w_arm[int(arm)])
-
-        # 3) Keep nuisance context small
+        interaction_user = 1.40 * float(self.true_user_group[user_id, group_id])
+        interaction_segment = 0.80 * float(self.true_segment_group[segment_id, group_id])
+        user_base = 0.30 * float(self.true_user_bias[user_id])
+        arm_base = 0.20 * float(self.true_arm_bias[int(arm)])
         nuisance = (
-            0.05 * self.true_w_device * float(context["device"])
-            + 0.05 * self.true_w_weekend * float(context["is_weekend"])
-            + 0.05 * float(self.true_w_hour[int(context["hour_bucket"])])
+            0.10 * self.true_device_w * float(context["device"])
+            + 0.10 * self.true_weekend_w * float(context["is_weekend"])
+            + 0.10 * float(self.true_hour_w[int(context["hour_bucket"])])
         )
 
-        logit = cfg.bias + seg_base + arm_base + interaction + nuisance
+        logit = cfg.bias + interaction_user + interaction_segment + user_base + arm_base + nuisance
         return sigmoid(logit)
-
-
 
     def oracle(self, context: Dict[str, Any], cand: np.ndarray) -> tuple[int, float]:
         ps = np.array([self.expected_reward(context, int(a)) for a in cand], dtype=float)
@@ -140,9 +163,10 @@ class AdPersonalizationEnv:
 
     def step(self, context: Dict[str, Any], candidate_arms: np.ndarray, chosen_arm: int) -> BanditStep:
         t = self.t
+        shift_applied = False
 
         if self.nonstationarity is not None:
-            self.nonstationarity.apply(self, t)
+            shift_applied = self.nonstationarity.apply(self, t)
 
         chosen_arm = int(chosen_arm)
         if chosen_arm not in set(map(int, candidate_arms)):
@@ -150,22 +174,35 @@ class AdPersonalizationEnv:
 
         opt_arm, p_opt = self.oracle(context, candidate_arms)
         p_chosen = float(self.expected_reward(context, chosen_arm))
-        r = self.draw_reward(p_chosen)
+        reward = self.draw_reward(p_chosen)
 
+        user_id = int(context["user_id"])
+        self.user_impressions[user_id] += 1
         self.t += 1
+
         return BanditStep(
             t=t,
             context=context,
             candidate_arms=candidate_arms,
             chosen_arm=chosen_arm,
-            reward=r,
+            reward=reward,
             p_chosen=p_chosen,
             p_opt=p_opt,
             opt_arm=opt_arm,
+            shift_applied=shift_applied,
         )
 
-    # shift hooks (called by AbruptShift)
-    def shift_preferences(self, strength: float = 1.2) -> None:
+    def shift_preferences(self, strength: float = 1.0) -> None:
         cfg = self.cfg
-        self.true_w_segment = self.rng.normal(0.0, strength, size=cfg.n_user_segments)
-        self.true_W_inter = self.rng.normal(0.0, 1.2 * strength, size=(cfg.n_user_segments, self.G))
+        self.true_segment_group = (
+            0.35 * self.true_segment_group
+            + self.rng.normal(0.0, 0.75 * strength, size=(cfg.n_user_segments, self.G))
+        )
+        self.true_user_group = (
+            0.35 * self.true_user_group
+            + self.rng.normal(0.0, strength, size=(cfg.max_users, self.G))
+        )
+        self.true_arm_bias = (
+            0.50 * self.true_arm_bias
+            + self.rng.normal(0.0, 0.20 * strength, size=cfg.n_arms)
+        )

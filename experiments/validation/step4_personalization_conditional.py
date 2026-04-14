@@ -4,28 +4,21 @@ import glob
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import pandas as pd
 
 
 @dataclass
 class CondCfg:
-    mode: str  # "stationary" or "nonstationary"
-    out_dir: str = "results/validation/step4_personalization_conditional"
+    mode: str
+    out_dir: str = "results/validation/step4_personalization"
 
 
 class ConditionalPersonalization:
     """
-    Correct personalization test under candidate-set constraint:
-
-    For each segment s and group g:
-        available_count = number of steps where g was in candidate_groups
-        chosen_count    = number of steps where chosen_group == g AND g was available
-        rate            = chosen_count / available_count
-
-    This directly answers:
-        "When group g is available, does segment s pick it more often?"
+    Conditional selection-rate diagnostic:
+    when a group is available, how often does each segment choose it?
     """
 
     def __init__(self, cfg: CondCfg) -> None:
@@ -34,145 +27,93 @@ class ConditionalPersonalization:
         self.base = os.path.join("results", "raw", cfg.mode)
 
     def run(self) -> None:
-        agents = [d for d in os.listdir(self.base) if os.path.isdir(os.path.join(self.base, d))]
-        all_rows = []
+        agents = sorted(
+            d for d in os.listdir(self.base)
+            if os.path.isdir(os.path.join(self.base, d))
+        )
 
+        outputs = []
         for agent in agents:
             df = self._load_agent(agent)
             if df.empty:
                 continue
-            out = self._compute_rates(df)
-            out.insert(0, "agent", agent)
-            out.insert(0, "mode", self.cfg.mode)
-            all_rows.append(out)
+            rates = self._compute_rates(df)
+            rates.insert(0, "agent", agent)
+            rates.insert(0, "mode", self.cfg.mode)
+            outputs.append(rates)
 
-        if not all_rows:
-            print("No data found. Did you rerun experiments after adding candidate_groups?")
+        if not outputs:
+            print(f"No usable personalization rows for mode={self.cfg.mode}.")
             return
 
-        res = pd.concat(all_rows, ignore_index=True)
+        result = pd.concat(outputs, ignore_index=True)
+        long_path = os.path.join(self.cfg.out_dir, f"{self.cfg.mode}_conditional_personalization.csv")
+        result.to_csv(long_path, index=False)
+        print("Saved:", long_path)
 
-        # save long-format table
-        out_path = os.path.join(self.cfg.out_dir, f"{self.cfg.mode}_conditional_personalization.csv")
-        res.to_csv(out_path, index=False)
-        print("Saved:", out_path)
-
-        # also save a pivot view (segment x group rates) per agent for quick reading
-        for agent in res["agent"].unique():
-            sub = res[res["agent"] == agent]
-            pivot = sub.pivot_table(index="segment_id", columns="group_id", values="selection_rate", aggfunc="mean")
-            pivot_path = os.path.join(self.cfg.out_dir, f"{self.cfg.mode}_{agent}_segment_x_group_rates.csv")
+        for agent in result["agent"].unique():
+            pivot = result[result["agent"] == agent].pivot_table(
+                index="segment_id",
+                columns="group_id",
+                values="selection_rate",
+                aggfunc="mean",
+            )
+            pivot_path = os.path.join(
+                self.cfg.out_dir,
+                f"{self.cfg.mode}_{agent}_segment_x_group_rates.csv",
+            )
             pivot.to_csv(pivot_path)
             print("Saved:", pivot_path)
 
-        # print a compact view
-        print("\nSample (first 20 rows):")
-        print(res.head(20).to_string(index=False))
-
-    # def _load_agent(self, agent: str) -> pd.DataFrame:
-    #     paths = glob.glob(os.path.join(self.base, agent, "seed_*.jsonl"))
-    #     rows = []
-    #     for p in paths:
-    #         with open(p, "r", encoding="utf-8") as f:
-    #             for line in f:
-    #                 r = json.loads(line)
-    #                 ctx = r.get("context", {})
-    #                 # require new logging fields
-    #                 if "candidate_groups" not in r or "chosen_group" not in r:
-    #                     continue
-    #                 rows.append(
-    #                     {
-    #                         "segment_id": int(ctx.get("segment_id", -1)),
-    #                         "chosen_group": int(r.get("chosen_group", -1)),
-    #                         "candidate_groups": list(r.get("candidate_groups", [])),
-    #                     }
-    #                 )
-    #     df = pd.DataFrame(rows)
-    #     df = df[df["segment_id"] >= 0]
-    #     df = df[df["chosen_group"] >= 0]
-    #     return df
+        print(result.head(20).to_string(index=False))
 
     def _load_agent(self, agent: str) -> pd.DataFrame:
         paths = glob.glob(os.path.join(self.base, agent, "seed_*.jsonl"))
         rows = []
-        skipped_missing = 0
-        skipped_badctx = 0
-
-        for p in paths:
-            with open(p, "r", encoding="utf-8") as f:
+        for path in paths:
+            with open(path, "r", encoding="utf-8") as f:
                 for line in f:
-                    r = json.loads(line)
-                    ctx = r.get("context", {})
-
-                    # must exist (new logging)
-                    if "candidate_groups" not in r or "chosen_group" not in r:
-                        skipped_missing += 1
-                        continue
-
-                    if "segment_id" not in ctx:
-                        skipped_badctx += 1
-                        continue
-
+                    row = json.loads(line)
                     rows.append(
                         {
-                            "segment_id": int(ctx["segment_id"]),
-                            "chosen_group": int(r["chosen_group"]),
-                            "candidate_groups": list(r["candidate_groups"]),
+                            "segment_id": int(row["segment_id"]),
+                            "chosen_group": int(row["chosen_group"]),
+                            "candidate_groups": list(row["candidate_groups"]),
                         }
                     )
-
-        # ✅ always create DF with expected columns
-        df = pd.DataFrame(rows, columns=["segment_id", "chosen_group", "candidate_groups"])
-
-        if df.empty:
-            print(
-                f"[WARN] No usable rows for agent='{agent}'. "
-                f"paths={len(paths)}, skipped_missing={skipped_missing}, skipped_badctx={skipped_badctx}\n"
-                f"      → Did you rerun experiments after adding chosen_group + candidate_groups logging?"
-            )
-            return df
-
-        df = df[df["segment_id"] >= 0]
-        df = df[df["chosen_group"] >= 0]
-        return df
+        return pd.DataFrame(rows, columns=["segment_id", "chosen_group", "candidate_groups"])
 
     def _compute_rates(self, df: pd.DataFrame) -> pd.DataFrame:
-        # counts[(segment, group)] = [available, chosen]
         available: Dict[Tuple[int, int], int] = {}
         chosen: Dict[Tuple[int, int], int] = {}
 
         for _, row in df.iterrows():
-            s = int(row["segment_id"])
-            cg = int(row["chosen_group"])
-            cands = row["candidate_groups"]
+            segment_id = int(row["segment_id"])
+            chosen_group = int(row["chosen_group"])
+            candidate_groups = [int(group) for group in row["candidate_groups"]]
 
-            # availability count
-            for g in cands:
-                key = (s, int(g))
+            for group in candidate_groups:
+                key = (segment_id, group)
                 available[key] = available.get(key, 0) + 1
 
-            # chosen count (only meaningful if chosen group was available)
-            if cg in cands:
-                keyc = (s, cg)
-                chosen[keyc] = chosen.get(keyc, 0) + 1
+            if chosen_group in candidate_groups:
+                chosen_key = (segment_id, chosen_group)
+                chosen[chosen_key] = chosen.get(chosen_key, 0) + 1
 
-        out_rows = []
-        keys = sorted(available.keys())
-        for (s, g) in keys:
-            av = available.get((s, g), 0)
-            ch = chosen.get((s, g), 0)
-            rate = (ch / av) if av > 0 else float("nan")
-            out_rows.append(
+        output_rows = []
+        for segment_id, group_id in sorted(available):
+            available_count = available[(segment_id, group_id)]
+            chosen_count = chosen.get((segment_id, group_id), 0)
+            output_rows.append(
                 {
-                    "segment_id": s,
-                    "group_id": g,
-                    "available_count": av,
-                    "chosen_count": ch,
-                    "selection_rate": rate,
+                    "segment_id": segment_id,
+                    "group_id": group_id,
+                    "available_count": available_count,
+                    "chosen_count": chosen_count,
+                    "selection_rate": chosen_count / available_count if available_count else float("nan"),
                 }
             )
-
-        return pd.DataFrame(out_rows)
+        return pd.DataFrame(output_rows)
 
 
 def main() -> None:

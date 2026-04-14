@@ -1,103 +1,16 @@
-# # experiment:
-# #   name: nonstationary
-# #   T: 10000
-# #   seeds: 20
-# #   shift_time: 5000
-
-# # env:
-# #   n_arms: 20
-# #   n_candidates: 10
-# #   cold_start_user_prob: 0.02
-
-# # models:
-# #   fm:
-# #     k: 8
-# #     lr: 0.05
-# #     prior_var: 1.0
-# #     drift_var: 0.002
-# #   logistic:
-# #     lr: 0.1
-# #     prior_var: 1.0
-# #     drift_var: 0.002
-
-# experiment:
-#   name: nonstationary
-#   T: 10000
-#   seeds: 20
-#   shift_time: 5000
-#   log_every: 1000
-
-# env:
-#   n_arms: 20
-#   n_candidates: 10
-#   cold_start_user_prob: 0.02
-#   n_user_segments: 6
-#   bias: -2.0
-
-# models:
-#   fm:
-#     k: 8
-#     lr: 0.05
-#     prior_var: 1.0
-#     drift_var: 0.002
-
-#   # You can keep this, but your current nonstationary runner doesn't use logistic_ts anymore
-#   logistic:
-#     lr: 0.1
-#     prior_var: 1.0
-#     drift_var: 0.002
-
-#   # ✅ REQUIRED by your current run_nonstationary.py
-#   probit:
-#     prior_var: 5.0
-#     window: 200
-#     gibbs_steps: 1
-#     update_every: 50
-
-#   # ✅ REQUIRED if you include hybrid in agents dict
-#   hybrid:
-#     warmup_impressions: 30
-#     recovery_steps: 500
-
-# metrics:
-#   cold_m: 30
-#   early_n: 1000
-#   adapt_w: 500
-
-
-# experiment:
-#   name: nonstationary
-#   T: 10000
-#   seeds: 20
-#   shift_time: 5000
-
-# env:
-#   n_arms: 20
-#   n_candidates: 10
-#   cold_start_user_prob: 0.02
-
-# models:
-#   fm:
-#     k: 8
-#     lr: 0.05
-#     prior_var: 1.0
-#     drift_var: 0.002
-#   logistic:
-#     lr: 0.1
-#     prior_var: 1.0
-#     drift_var: 0.002
-
 experiment:
   name: nonstationary
   T: 10000
   seeds: 20
   shift_time: 5000
+  shift_strength: 1.0
   log_every: 1000
 
 env:
   n_arms: 20
   n_candidates: 10
   cold_start_user_prob: 0.02
+  max_users: 160
   n_user_segments: 6
   bias: -2.0
 
@@ -108,29 +21,26 @@ models:
     prior_var: 1.0
     drift_var: 0.002
 
-  # You can keep this, but your current nonstationary runner doesn't use logistic_ts anymore
-  logistic:
-    lr: 0.1
-    prior_var: 1.0
-    drift_var: 0.002
-
-  # ✅ REQUIRED by your current run_nonstationary.py
   probit:
     prior_var: 5.0
     window: 200
     gibbs_steps: 1
     update_every: 50
+    ridge: 0.000001
 
-  # ✅ REQUIRED if you include hybrid in agents dict
   hybrid:
-    warmup_impressions: 30
+    warmup_impressions: 10
+    blend_span: 80
+    max_fm_weight: 0.35
+    fm_override_margin: 0.03
+    max_probit_drop: 0.06
     recovery_steps: 500
 
 metrics:
-  cold_m: 30
+  cold_m: 20
   early_n: 1000
   adapt_w: 500
 
 ablation:
-  warmup_impressions: [10, 30, 50]
-  recovery_steps: [0, 200, 500]
+  warmup_impressions: [10, 20, 30]
+  recovery_steps: [0, 250, 500]

@@ -27,7 +27,7 @@ class MetricsReporter:
             f.write(
                 "Step 1 Metrics Report\n"
                 "- stationary_metrics.csv: CTR, regret, cold-start, early metrics, time\n"
-                "- nonstationary_metrics.csv: CTR, dynamic regret, ctr_after_shift, ctr_last_w, time\n"
+                "- nonstationary_metrics.csv: CTR, dynamic regret, cold-start, ctr_after_shift, ctr_last_w, time\n"
             )
 
     def _copy_and_clean(self, src: str, dst: str) -> None:

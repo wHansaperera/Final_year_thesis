@@ -1,8 +1,6 @@
-from .random_agent import RandomAgent
-from .logistic_ts import LogisticTSAgent
-from .ts_agent import ThompsonAgent
-from .probit_ts import ProbitTSAgent
 from .hybrid_agent import HybridColdStartAgent
+from .probit_ts import ProbitTSAgent
+from .random_agent import RandomAgent
+from .ts_agent import ThompsonAgent
 
-
-__all__ = ["RandomAgent", "LogisticTSAgent", "ThompsonAgent", "ProbitTSAgent", "HybridColdStartAgent"]
+__all__ = ["RandomAgent", "ThompsonAgent", "ProbitTSAgent", "HybridColdStartAgent"]

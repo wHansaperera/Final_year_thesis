@@ -1,95 +1,8 @@
-# from __future__ import annotations
-# from dataclasses import dataclass, field
-# from typing import Dict, Any
-# import numpy as np
-
-# from bandit_thesis.agents.probit_ts import ProbitTSAgent
-# from bandit_thesis.agents.ts_agent import ThompsonAgent
-
-
-# @dataclass
-# class HybridColdStartAgent:
-#     """
-#     Hybrid policy:
-#       - Use Probit TS for cold-start (first M impressions per user)
-#       - Switch to FM Thompson Sampling after M impressions
-
-#     This is a POLICY hybrid, not a new reward model.
-#     """
-#     probit: ProbitTSAgent
-#     fm: ThompsonAgent
-#     warmup_impressions: int = 30
-#     user_impressions: Dict[int, int] = field(default_factory=dict)
-
-#     def _user_id(self, ctx: Dict[str, Any]) -> int:
-#         # adjust if your context uses another key
-#         return int(ctx.get("user_id", ctx.get("uid", 0)))
-
-#     def select_arm(self, X_cand: np.ndarray, candidate_arms: np.ndarray, ctx: Dict[str, Any]) -> int:
-#         uid = self._user_id(ctx)
-#         n = self.user_impressions.get(uid, 0)
-
-#         if n < self.warmup_impressions:
-#             # cold-start: Bayesian Probit TS
-#             return int(self.probit.select_arm(X_cand, candidate_arms))
-#         else:
-#             # warm-start: FM TS (interaction personalization)
-#             return int(self.fm.select_arm(X_cand, candidate_arms))
-
-#     def update(self, x_chosen: np.ndarray, reward: int, ctx: Dict[str, Any]) -> None:
-#         uid = self._user_id(ctx)
-#         self.user_impressions[uid] = self.user_impressions.get(uid, 0) + 1
-
-#         # update BOTH so FM is learning in background during cold-start too
-#         self.probit.update(x_chosen, reward)
-#         self.fm.update(x_chosen, reward)
-
-
-# from dataclasses import dataclass, field
-# from typing import Dict, Any
-# import numpy as np
-
-# from bandit_thesis.agents.probit_ts import ProbitTSAgent
-# from bandit_thesis.agents.ts_agent import ThompsonAgent
-
-
-# @dataclass
-# class HybridColdStartAgent:
-#     probit: ProbitTSAgent
-#     fm: ThompsonAgent
-#     warmup_impressions: int = 30
-#     update_fm_during_warmup: bool = True  # <--- add this switch
-#     user_impressions: Dict[int, int] = field(default_factory=dict)
-
-#     def _user_id(self, ctx: Dict[str, Any]) -> int:
-#         return int(ctx.get("user_id", ctx.get("uid", 0)))
-
-#     def reset(self) -> None:
-#         self.user_impressions.clear()
-
-#     def select_arm(self, X_cand: np.ndarray, candidate_arms: np.ndarray, ctx: Dict[str, Any]) -> int:
-#         uid = self._user_id(ctx)
-#         n = self.user_impressions.get(uid, 0)
-
-#         if n < self.warmup_impressions:
-#             return int(self.probit.select_arm(X_cand, candidate_arms))
-#         return int(self.fm.select_arm(X_cand, candidate_arms))
-
-#     def update(self, x_chosen: np.ndarray, reward: int, ctx: Dict[str, Any]) -> None:
-#         uid = self._user_id(ctx)
-#         n = self.user_impressions.get(uid, 0)
-#         self.user_impressions[uid] = n + 1
-
-#         # always update probit
-#         self.probit.update(x_chosen, reward)
-
-#         # update FM only if allowed during warmup or if warmup completed
-#         if self.update_fm_during_warmup or n >= self.warmup_impressions:
-#             self.fm.update(x_chosen, reward)
-
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, Any
+
+from dataclasses import dataclass
+from typing import Any, Dict
+
 import numpy as np
 
 from bandit_thesis.agents.probit_ts import ProbitTSAgent
@@ -100,53 +13,93 @@ from bandit_thesis.agents.ts_agent import ThompsonAgent
 class HybridColdStartAgent:
     probit: ProbitTSAgent
     fm: ThompsonAgent
-    warmup_impressions: int = 30
-
-    # ✅ Option B: recovery window after shift
+    warmup_impressions: int = 10
+    blend_span: int = 40
+    max_fm_weight: float = 0.45
+    fm_override_margin: float = 0.03
+    max_probit_drop: float = 0.06
     recovery_steps: int = 500
-    recovery_until_t: int = -1  # if t < recovery_until_t => force probit
 
-    user_impressions: Dict[int, int] = field(default_factory=dict)
-
-    def _user_id(self, ctx: Dict[str, Any]) -> int:
-        return int(ctx.get("user_id", 0))
+    def __post_init__(self) -> None:
+        self.recovery_until_t = -1
+        self.last_mode = "probit_cold_start"
 
     def reset(self) -> None:
-        self.user_impressions.clear()
         self.recovery_until_t = -1
+        self.last_mode = "probit_cold_start"
         if hasattr(self.probit, "reset"):
             self.probit.reset()
 
-    def on_shift(self, t: int) -> None:
-        """Call when environment shifts. Force probit decisions for next recovery_steps."""
-        self.recovery_until_t = int(t) + int(self.recovery_steps)
+    def on_shift(self, next_t: int) -> None:
+        self.recovery_until_t = int(next_t) + int(self.recovery_steps)
+
+    def _fm_weight(self, user_history_len: int) -> float:
+        if user_history_len < self.warmup_impressions:
+            return 0.0
+        progress = (user_history_len - self.warmup_impressions) / max(self.blend_span, 1)
+        progress = float(np.clip(progress, 0.0, 1.0))
+        return float(self.max_fm_weight * progress)
+
+    def _allow_fm_override(
+        self,
+        probit_scores: np.ndarray,
+        fm_scores: np.ndarray,
+        probit_idx: int,
+        fm_idx: int,
+        fm_weight: float,
+    ) -> bool:
+        if fm_idx == probit_idx:
+            return True
+        if fm_weight < 0.5 * self.max_fm_weight:
+            return False
+
+        fm_margin = float(fm_scores[fm_idx] - fm_scores[probit_idx])
+        probit_drop = float(probit_scores[probit_idx] - probit_scores[fm_idx])
+        return fm_margin >= self.fm_override_margin and probit_drop <= self.max_probit_drop
 
     def select_arm(self, X_cand: np.ndarray, candidate_arms: np.ndarray, ctx: Dict[str, Any]) -> int:
-        uid = self._user_id(ctx)
-        n = self.user_impressions.get(uid, 0)
-
-        # current global time (we will add ctx["t"] in experiments)
         t = int(ctx.get("t", -1))
+        user_history_len = int(ctx.get("user_history_len", 0))
 
-        # ✅ If in recovery window, force probit
+        probit_scores = self.probit.score_candidates(X_cand)
+
         if t >= 0 and t < self.recovery_until_t:
-            return int(self.probit.select_arm(X_cand, candidate_arms))
+            self.last_mode = "probit_recovery"
+            return int(candidate_arms[int(np.argmax(probit_scores))])
 
-        # cold-start by user impressions
-        if n < self.warmup_impressions:
-            return int(self.probit.select_arm(X_cand, candidate_arms))
+        fm_weight = self._fm_weight(user_history_len)
+        if fm_weight <= 0.0:
+            self.last_mode = "probit_cold_start"
+            return int(candidate_arms[int(np.argmax(probit_scores))])
 
-        return int(self.fm.select_arm(X_cand, candidate_arms))
+        fm_scores = self.fm.score_candidates(X_cand)
+        probit_idx = int(np.argmax(probit_scores))
+        fm_idx = int(np.argmax(fm_scores))
+        scores = (1.0 - fm_weight) * probit_scores + fm_weight * fm_scores
+        blended_idx = int(np.argmax(scores))
+
+        if not self._allow_fm_override(probit_scores, fm_scores, probit_idx, fm_idx, fm_weight):
+            self.last_mode = "probit_guardrail"
+            return int(candidate_arms[probit_idx])
+
+        if fm_idx == probit_idx:
+            if fm_weight >= self.max_fm_weight:
+                self.last_mode = "consensus_personalized"
+            else:
+                self.last_mode = "consensus_transition"
+            return int(candidate_arms[blended_idx])
+
+        if fm_weight >= self.max_fm_weight:
+            self.last_mode = "blended_personalized"
+        else:
+            self.last_mode = "blended_transition"
+        return int(candidate_arms[blended_idx])
 
     def update(self, x_chosen: np.ndarray, reward: int, ctx: Dict[str, Any]) -> None:
-        uid = self._user_id(ctx)
-        self.user_impressions[uid] = self.user_impressions.get(uid, 0) + 1
-
-        # update both (good performance)
+        del ctx
         self.probit.update(x_chosen, reward)
         self.fm.update(x_chosen, reward)
 
     def flush(self) -> None:
-    # Only probit has buffered update steps
         if hasattr(self.probit, "flush"):
             self.probit.flush()

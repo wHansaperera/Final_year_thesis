@@ -71,6 +71,22 @@ class BayesianFM:
         w0_s, w_s, V_s = self.sample_params()
         return sigmoid(self._fm_logit(x, w0_s, w_s, V_s))
 
+    def sampled_probabilities(
+        self,
+        X: np.ndarray,
+        params: Tuple[float, np.ndarray, np.ndarray] | None = None,
+    ) -> np.ndarray:
+        """
+        Score a candidate set using one shared Thompson sample.
+        """
+        if params is None:
+            params = self.sample_params()
+        w0_s, w_s, V_s = params
+        return np.array(
+            [sigmoid(self._fm_logit(X[i], w0_s, w_s, V_s)) for i in range(X.shape[0])],
+            dtype=float,
+        )
+
     def update(self, x: np.ndarray, y: int) -> None:
         """
         One-step update with logistic loss gradient:

@@ -1,10 +1,10 @@
 from __future__ import annotations
+
 import glob
+import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
-
-import yaml
+from typing import List
 
 
 @dataclass
@@ -17,99 +17,86 @@ class ExperimentDesignVerifier:
     def __init__(self, repo_root: str = ".") -> None:
         self.repo_root = repo_root
 
-    def _load_yaml(self, path: str) -> dict:
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-
     def _check_exists(self, path: str) -> CheckResult:
-        return CheckResult(os.path.exists(path), f"{'OK' if os.path.exists(path) else 'MISSING'}: {path}")
+        exists = os.path.exists(path)
+        return CheckResult(exists, f"{'OK' if exists else 'MISSING'}: {path}")
 
     def verify(self) -> List[CheckResult]:
         results: List[CheckResult] = []
-
-        # configs
-        stat_cfg_path = os.path.join(self.repo_root, "configs", "stationary.yaml")
-        non_cfg_path = os.path.join(self.repo_root, "configs", "nonstationary.yaml")
-        results.append(self._check_exists(stat_cfg_path))
-        results.append(self._check_exists(non_cfg_path))
-
-        if os.path.exists(stat_cfg_path):
-            cfg = self._load_yaml(stat_cfg_path)
-            results.extend(self._verify_stationary_cfg(cfg))
-
-        if os.path.exists(non_cfg_path):
-            cfg = self._load_yaml(non_cfg_path)
-            results.extend(self._verify_nonstationary_cfg(cfg))
-
-        # tables
-        results.append(self._check_exists(os.path.join(self.repo_root, "results", "tables", "stationary_summary.csv")))
-        results.append(self._check_exists(os.path.join(self.repo_root, "results", "tables", "nonstationary_summary.csv")))
-
-        # raw logs presence
-        results.extend(self._verify_raw_logs("stationary"))
-        results.extend(self._verify_raw_logs("nonstationary"))
-
+        for mode in ["stationary", "nonstationary"]:
+            results.extend(self._verify_mode(mode))
         return results
 
-    def _verify_stationary_cfg(self, cfg: dict) -> List[CheckResult]:
-        req = [("experiment", ["T", "seeds"]), ("env", ["n_arms", "n_candidates"]), ("models", ["fm", "probit", "hybrid"])]
+    def _verify_mode(self, mode: str) -> List[CheckResult]:
         out: List[CheckResult] = []
-        for section, keys in req:
-            if section not in cfg:
-                out.append(CheckResult(False, f"MISSING section: {section}"))
-                continue
-            for k in keys:
-                if k not in cfg[section]:
-                    out.append(CheckResult(False, f"MISSING key: {section}.{k}"))
-        # metrics optional but recommended
-        if "metrics" not in cfg:
-            out.append(CheckResult(False, "RECOMMENDED: add metrics.cold_m and metrics.early_n in stationary.yaml"))
-        return out
+        manifest_path = os.path.join(self.repo_root, "results", "manifests", f"{mode}.json")
+        summary_path = os.path.join(self.repo_root, "results", "tables", f"{mode}_summary.csv")
+        raw_base = os.path.join(self.repo_root, "results", "raw", mode)
 
-    def _verify_nonstationary_cfg(self, cfg: dict) -> List[CheckResult]:
-        out = []
-        if "experiment" not in cfg:
-            return [CheckResult(False, "MISSING section: experiment")]
-        T = int(cfg["experiment"].get("T", 0))
-        shift = int(cfg["experiment"].get("shift_time", -1))
-        if shift >= T:
-            out.append(CheckResult(False, f"BAD: shift_time ({shift}) must be < T ({T}) for ctr_after_shift to work"))
-        else:
-            out.append(CheckResult(True, f"OK: shift_time ({shift}) < T ({T})"))
-        if "metrics" not in cfg or "adapt_w" not in cfg.get("metrics", {}):
-            out.append(CheckResult(False, "RECOMMENDED: add metrics.adapt_w in nonstationary.yaml"))
-        return out
+        out.append(self._check_exists(manifest_path))
+        out.append(self._check_exists(summary_path))
 
-    def _verify_raw_logs(self, mode: str) -> List[CheckResult]:
-        base = os.path.join(self.repo_root, "results", "raw", mode)
-        if not os.path.isdir(base):
-            return [CheckResult(False, f"MISSING raw folder: {base}")]
-        agents = [d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))]
-        out: List[CheckResult] = []
-        if not agents:
-            out.append(CheckResult(False, f"No agents found in {base}"))
+        if not os.path.isdir(raw_base):
+            out.append(CheckResult(False, f"MISSING raw folder: {raw_base}"))
             return out
 
-        counts = {}
-        for a in agents:
-            files = glob.glob(os.path.join(base, a, "seed_*.jsonl"))
-            counts[a] = len(files)
-        # paired fairness check: same number of seed files
-        unique = set(counts.values())
-        if len(unique) != 1:
-            out.append(CheckResult(False, f"NOT PAIRED: seed counts differ across agents: {counts}"))
+        agents = sorted(
+            d for d in os.listdir(raw_base)
+            if os.path.isdir(os.path.join(raw_base, d))
+        )
+        if not agents:
+            out.append(CheckResult(False, f"No agent folders found in {raw_base}"))
+            return out
+
+        seed_sets = {}
+        for agent in agents:
+            paths = glob.glob(os.path.join(raw_base, agent, "seed_*.jsonl"))
+            seeds = sorted(int(os.path.basename(path).split("_")[1].split(".")[0]) for path in paths)
+            seed_sets[agent] = seeds
+
+        expected = None
+        for agent, seeds in seed_sets.items():
+            if expected is None:
+                expected = seeds
+            elif seeds != expected:
+                out.append(CheckResult(False, f"NOT PAIRED in {mode}: {seed_sets}"))
+                break
         else:
-            out.append(CheckResult(True, f"OK paired seeds: {counts}"))
+            out.append(CheckResult(True, f"OK paired seeds in {mode}: {seed_sets}"))
+
+        sample_paths = glob.glob(os.path.join(raw_base, agents[0], "seed_*.jsonl"))
+        if sample_paths:
+            with open(sample_paths[0], "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+            if first_line:
+                row = json.loads(first_line)
+                required_fields = {
+                    "schema_version",
+                    "seed",
+                    "agent",
+                    "t",
+                    "user_id",
+                    "user_history_len",
+                    "candidate_arms",
+                    "decision_mode",
+                    "shift_applied",
+                }
+                missing = sorted(required_fields.difference(row))
+                if missing:
+                    out.append(CheckResult(False, f"BAD schema in {mode}: missing {missing}"))
+                else:
+                    out.append(CheckResult(True, f"OK raw schema in {mode}: required fields present"))
+
         return out
 
 
 def main() -> None:
-    v = ExperimentDesignVerifier(".")
-    res = v.verify()
-    for r in res:
-        print(r.message)
+    verifier = ExperimentDesignVerifier(".")
+    results = verifier.verify()
+    for result in results:
+        print(result.message)
 
-    failed = [r for r in res if not r.ok]
+    failed = [result for result in results if not result.ok]
     if failed:
         raise SystemExit("\nDesign verification FAILED. Fix items above.")
     print("\nDesign verification PASSED.")
