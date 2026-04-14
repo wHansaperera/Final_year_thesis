@@ -13,7 +13,8 @@ dependencies = [
   "pandas",
   "scipy",
   "matplotlib",
-  "pyyaml"
+  "pyyaml",
+  "scikit-learn>=1.3"
 ]
 
 [tool.setuptools]

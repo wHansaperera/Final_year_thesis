@@ -9,6 +9,7 @@ Requires-Dist: pandas
 Requires-Dist: scipy
 Requires-Dist: matplotlib
 Requires-Dist: pyyaml
+Requires-Dist: scikit-learn>=1.3
 
 # Bayesian FM Contextual Bandit Thesis (Simulation)
 

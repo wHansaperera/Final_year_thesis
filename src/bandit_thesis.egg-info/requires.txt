@@ -3,3 +3,4 @@ pandas
 scipy
 matplotlib
 pyyaml
+scikit-learn>=1.3
