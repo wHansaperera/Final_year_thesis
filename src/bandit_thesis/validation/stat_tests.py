@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
+from scipy.stats import rankdata, shapiro, skew
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,15 @@ class BootstrapCI:
     diff_mean: float
     ci_low: float
     ci_high: float
+
+
+@dataclass(frozen=True)
+class NormalityCheck:
+    n: int
+    shapiro_stat: float
+    shapiro_p: float
+    skewness: float
+    approximately_normal: bool
 
 
 def paired_bootstrap_ci(
@@ -46,6 +56,56 @@ def paired_cohens_dz(a: np.ndarray, b: np.ndarray) -> float:
     if sd == 0.0:
         return float("nan")
     return float(np.mean(diffs) / sd)
+
+
+def check_paired_normality(diffs: np.ndarray, alpha: float = 0.05) -> NormalityCheck:
+    values = np.asarray(diffs, dtype=float)
+    values = values[np.isfinite(values)]
+    n = int(values.size)
+
+    if n < 3:
+        return NormalityCheck(
+            n=n,
+            shapiro_stat=float("nan"),
+            shapiro_p=float("nan"),
+            skewness=float("nan"),
+            approximately_normal=False,
+        )
+
+    if np.allclose(values, values[0]):
+        return NormalityCheck(
+            n=n,
+            shapiro_stat=float("nan"),
+            shapiro_p=float("nan"),
+            skewness=0.0,
+            approximately_normal=False,
+        )
+
+    shapiro_stat, shapiro_p = shapiro(values)
+    skewness = float(skew(values, bias=False))
+    return NormalityCheck(
+        n=n,
+        shapiro_stat=float(shapiro_stat),
+        shapiro_p=float(shapiro_p),
+        skewness=skewness,
+        approximately_normal=bool(np.isfinite(shapiro_p) and shapiro_p >= alpha),
+    )
+
+
+def paired_rank_biserial(diffs: np.ndarray) -> float:
+    values = np.asarray(diffs, dtype=float)
+    values = values[np.isfinite(values)]
+    values = values[~np.isclose(values, 0.0)]
+    if values.size == 0:
+        return float("nan")
+
+    ranks = rankdata(np.abs(values), method="average")
+    pos_rank_sum = float(np.sum(ranks[values > 0]))
+    neg_rank_sum = float(np.sum(ranks[values < 0]))
+    total_rank_sum = pos_rank_sum + neg_rank_sum
+    if total_rank_sum == 0.0:
+        return float("nan")
+    return float((pos_rank_sum - neg_rank_sum) / total_rank_sum)
 
 
 def holm_adjust(p_values: Iterable[float]) -> np.ndarray:
